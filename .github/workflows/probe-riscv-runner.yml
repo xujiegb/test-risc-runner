@@ -1,0 +1,160 @@
+name: Probe RISC-V Runner
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    name: probe ubuntu-24.04-riscv
+    runs-on: ubuntu-24.04-riscv
+
+    steps:
+      - name: Basic system info
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          echo "===== uname ====="
+          uname -a || true
+
+          echo "===== os-release ====="
+          cat /etc/os-release || true
+
+          echo "===== hostnamectl ====="
+          hostnamectl || true
+
+          echo "===== whoami ====="
+          whoami || true
+
+          echo "===== id ====="
+          id || true
+
+      - name: Detect virtualization / container
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          echo "===== systemd-detect-virt ====="
+          command -v systemd-detect-virt >/dev/null 2>&1 && systemd-detect-virt || true
+          command -v systemd-detect-virt >/dev/null 2>&1 && systemd-detect-virt --container || true
+          command -v systemd-detect-virt >/dev/null 2>&1 && systemd-detect-virt --vm || true
+
+          echo "===== /proc/1/cgroup ====="
+          cat /proc/1/cgroup || true
+
+          echo "===== mount | grep cgroup ====="
+          mount | grep cgroup || true
+
+          echo "===== environment ====="
+          env | sort | grep -Ei 'kube|container|docker|pod|runner|actions|github' || true
+
+      - name: CPU and architecture probe
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          echo "===== arch ====="
+          arch || true
+
+          echo "===== uname -m ====="
+          uname -m || true
+
+          echo "===== lscpu ====="
+          command -v lscpu >/dev/null 2>&1 && lscpu || true
+
+          echo "===== /proc/cpuinfo ====="
+          cat /proc/cpuinfo || true
+
+          echo "===== RISC-V ISA ====="
+          grep -i 'isa' /proc/cpuinfo || true
+
+      - name: Kernel and boot probe
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          echo "===== kernel cmdline ====="
+          cat /proc/cmdline || true
+
+          echo "===== kernel version ====="
+          uname -r || true
+
+          echo "===== dmesg (virt/qemu/kvm/docker/container) ====="
+          dmesg 2>/dev/null | grep -Ei 'virt|qemu|kvm|hypervisor|docker|container|kube' || true
+
+          echo "===== dmesg (riscv/vendor/hardware) ====="
+          dmesg 2>/dev/null | grep -Ei 'riscv|sifive|starfive|thead|spacemit|sophgo|milk-v|pioneer|em-rv1' || true
+
+      - name: Device tree probe
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          echo "===== /proc/device-tree ====="
+          ls -la /proc/device-tree || true
+
+          echo "===== first level of device-tree ====="
+          find /proc/device-tree -maxdepth 1 -mindepth 1 -printf '%f\n' 2>/dev/null | sort || true
+
+          echo "===== model ====="
+          tr -d '\000' </proc/device-tree/model 2>/dev/null || true
+          echo || true
+
+          echo "===== compatible ====="
+          tr -d '\000' </proc/device-tree/compatible 2>/dev/null || true
+          echo || true
+
+      - name: Kubernetes / container hints
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          echo "===== kubernetes secret dir ====="
+          ls -la /var/run/secrets/kubernetes.io 2>/dev/null || true
+          find /var/run/secrets/kubernetes.io -maxdepth 3 -type f 2>/dev/null || true
+
+          echo "===== container files ====="
+          ls -la /.dockerenv 2>/dev/null || true
+          ls -la /run/.containerenv 2>/dev/null || true
+
+      - name: Hardware / block / memory
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          echo "===== free -h ====="
+          free -h || true
+
+          echo "===== lsblk ====="
+          command -v lsblk >/dev/null 2>&1 && lsblk || true
+
+          echo "===== df -h ====="
+          df -h || true
+
+      - name: Summary
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "===== SUMMARY ====="
+          echo "arch: $(uname -m || true)"
+          echo "kernel: $(uname -r || true)"
+          echo "virt: $(systemd-detect-virt 2>/dev/null || echo unknown)"
+
+          if grep -qi 'kubepods\|docker\|containerd' /proc/1/cgroup 2>/dev/null; then
+            echo "cgroup: container-like"
+          else
+            echo "cgroup: not obviously containerized"
+          fi
+
+          if grep -qi 'isa' /proc/cpuinfo 2>/dev/null; then
+            echo "cpuinfo: RISC-V ISA line present"
+          else
+            echo "cpuinfo: no obvious RISC-V ISA line"
+          fi
+
+          if [ -d /proc/device-tree ]; then
+            echo "device-tree: present"
+          else
+            echo "device-tree: absent"
+          fi
